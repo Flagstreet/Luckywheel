@@ -1,5 +1,6 @@
 package se.rfab.luckywheel
 
+import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,8 +32,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -49,6 +53,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -83,6 +88,7 @@ fun LuckyWheelApp() {
     var showSettings by remember { mutableStateOf(false) }
     val wheelOptions = remember { mutableStateListOf<WheelOption>() }
     val context = LocalContext.current
+    val scope   = rememberCoroutineScope()
 
     val themeId      by remember(context) { AppSettings.themeId(context) }
                         .collectAsState(initial = "standard")
@@ -90,6 +96,14 @@ fun LuckyWheelApp() {
                         .collectAsState(initial = true)
 
     val currentTheme = ThemeManager.getById(themeId)
+
+    // BillingManager lives for the lifetime of this composition
+    val billingManager = remember { BillingManager(context, scope) }
+    DisposableEffect(Unit) { onDispose { billingManager.destroy() } }
+
+    val hasExtraOptions by billingManager.hasExtraOptions.collectAsState()
+    val sessionPrice    by billingManager.sessionPrice.collectAsState()
+    val lifetimePrice   by billingManager.lifetimePrice.collectAsState()
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
         when {
@@ -101,12 +115,21 @@ fun LuckyWheelApp() {
             )
             showWheel -> WheelScreen(
                 options        = wheelOptions,
-                onNavigateBack = { showWheel = false },
+                onNavigateBack = {
+                    billingManager.resetSession()
+                    showWheel = false
+                },
                 onOpenSettings = { showSettings = true },
                 modifier       = Modifier.padding(innerPadding)
             )
             else -> InputScreen(
-                themeColors       = currentTheme.colors,
+                themeColors     = currentTheme.colors,
+                hasExtraOptions = hasExtraOptions,
+                sessionPrice    = sessionPrice,
+                lifetimePrice   = lifetimePrice,
+                onRequestPurchase = { productId ->
+                    billingManager.launchPurchase(context as Activity, productId)
+                },
                 onNavigateToWheel = { options ->
                     wheelOptions.clear()
                     wheelOptions.addAll(options)
@@ -119,15 +142,26 @@ fun LuckyWheelApp() {
     }
 }
 
+/** Maximum number of options available without a purchase. */
+private const val FREE_OPTION_LIMIT = 3
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InputScreen(
     themeColors: List<Color>,
+    hasExtraOptions: Boolean,
+    sessionPrice: String,
+    lifetimePrice: String,
+    onRequestPurchase: (productId: String) -> Unit,
     onNavigateToWheel: (List<WheelOption>) -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val options = remember { mutableStateListOf("", "") }
+    var showPurchaseDialog by remember { mutableStateOf(false) }
+
+    // Effective cap: 3 for free users, 6 once unlocked
+    val maxOptions = if (hasExtraOptions) 6 else FREE_OPTION_LIMIT
 
     Column(
         modifier = modifier.fillMaxSize(),
@@ -182,17 +216,31 @@ fun InputScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // "Add option" button – shows purchase dialog when the free limit is reached
+            val atFreeLimit   = options.size >= FREE_OPTION_LIMIT && !hasExtraOptions
+            val atAbsoluteMax = options.size >= 6
+
             Button(
-                onClick = { options.add("") },
-                enabled = options.size < 6,
+                onClick = {
+                    when {
+                        atAbsoluteMax -> { /* button is disabled */ }
+                        atFreeLimit   -> showPurchaseDialog = true
+                        else          -> options.add("")
+                    }
+                },
+                enabled = !atAbsoluteMax,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF6200EE),
+                    containerColor = if (atFreeLimit) Color(0xFF9C27B0) else Color(0xFF6200EE),
                     disabledContainerColor = Color.Gray
                 ),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = if (options.size < 6) "Add Option" else "Max 6 options",
+                    text = when {
+                        atAbsoluteMax -> "Max 6 alternativ"
+                        atFreeLimit   -> "🔒 Fler alternativ (4–6)"
+                        else          -> "Lägg till alternativ"
+                    },
                     color = Color.White
                 )
             }
@@ -225,6 +273,84 @@ fun InputScreen(
                 )
             }
         }
+    }
+
+    // ── Purchase dialog ───────────────────────────────────────────────────
+    if (showPurchaseDialog) {
+        AlertDialog(
+            onDismissRequest = { showPurchaseDialog = false },
+            title = {
+                Text(
+                    text = "Fler alternativ",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Gratisversionen tillåter upp till 3 alternativ.\nVälj ett av alternativen nedan för att låsa upp 4–6 alternativ.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Session purchase
+                    Button(
+                        onClick = {
+                            onRequestPurchase(PRODUCT_SESSION)
+                            showPurchaseDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6200EE)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "En session  –  $sessionPrice",
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Gäller tills du stänger appen",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Lifetime purchase
+                    Button(
+                        onClick = {
+                            onRequestPurchase(PRODUCT_LIFETIME)
+                            showPurchaseDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4444)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Livstid  –  $lifetimePrice",
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Låst upp för alltid",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showPurchaseDialog = false }) {
+                    Text("Avbryt")
+                }
+            }
+        )
     }
 }
 
@@ -478,6 +604,10 @@ fun InputScreenPreview() {
     LuckywheelTheme {
         InputScreen(
             themeColors       = ThemeManager.getById("standard").colors,
+            hasExtraOptions   = false,
+            sessionPrice      = "1 USD",
+            lifetimePrice     = "15 USD",
+            onRequestPurchase = {},
             onNavigateToWheel = {},
             onOpenSettings    = {}
         )

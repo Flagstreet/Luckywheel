@@ -15,8 +15,9 @@ val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "ap
 
 object AppSettings {
 
-    private val THEME_ID      = stringPreferencesKey("theme_id")
-    private val SOUND_ENABLED = booleanPreferencesKey("sound_enabled")
+    private val THEME_ID          = stringPreferencesKey("theme_id")
+    private val SOUND_ENABLED     = booleanPreferencesKey("sound_enabled")
+    private val LIFETIME_UNLOCKED = booleanPreferencesKey("lifetime_unlocked")
 
     fun themeId(context: Context): Flow<String> =
         context.dataStore.data.map { prefs -> prefs[THEME_ID] ?: "standard" }
@@ -24,11 +25,18 @@ object AppSettings {
     fun soundEnabled(context: Context): Flow<Boolean> =
         context.dataStore.data.map { prefs -> prefs[SOUND_ENABLED] ?: true }
 
+    fun lifetimeUnlocked(context: Context): Flow<Boolean> =
+        context.dataStore.data.map { prefs -> prefs[LIFETIME_UNLOCKED] ?: false }
+
     suspend fun setThemeId(context: Context, id: String) {
         context.dataStore.edit { it[THEME_ID] = id }
     }
 
     suspend fun setSoundEnabled(context: Context, enabled: Boolean) {
         context.dataStore.edit { it[SOUND_ENABLED] = enabled }
+    }
+
+    suspend fun setLifetimeUnlocked(context: Context, unlocked: Boolean) {
+        context.dataStore.edit { it[LIFETIME_UNLOCKED] = unlocked }
     }
 }
