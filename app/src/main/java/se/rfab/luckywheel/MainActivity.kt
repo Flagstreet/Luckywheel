@@ -36,6 +36,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -43,6 +44,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -115,6 +118,7 @@ fun LuckyWheelApp() {
             )
             showWheel -> WheelScreen(
                 options        = wheelOptions,
+                soundEnabled   = soundEnabled,
                 onNavigateBack = {
                     billingManager.resetSession()
                     showWheel = false
@@ -358,6 +362,7 @@ fun InputScreen(
 @Composable
 fun WheelScreen(
     options: List<WheelOption>,
+    soundEnabled: Boolean = true,
     onNavigateBack: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
@@ -376,6 +381,33 @@ fun WheelScreen(
         val phase = ((rotation.value % nitAngleDeg) + nitAngleDeg) % nitAngleDeg / nitAngleDeg
         28f * (1f - phase)
     } else 0f
+
+    // ── Ljud ─────────────────────────────────────────────────────────────────
+    val context = LocalContext.current
+    val soundEngine = remember { WheelSoundEngine(context) }
+    val currentSoundEnabled by rememberUpdatedState(soundEnabled)
+
+    // Initierar SoundPool när composable mountas; frigör när den lämnar.
+    DisposableEffect(Unit) {
+        soundEngine.init()
+        onDispose { soundEngine.release() }
+    }
+
+    // Spelar ett klick varje gång en nit passerar flärpen (rotation ökar med nitAngleDeg).
+    // snapshotFlow observerar rotation.value och emittar vid varje animationsbild.
+    LaunchedEffect(Unit) {
+        var prevNitCount = (rotation.value / nitAngleDeg).toInt()
+        snapshotFlow { rotation.value }.collect { currentRotation ->
+            val currentNitCount = (currentRotation / nitAngleDeg).toInt()
+            val delta = currentNitCount - prevNitCount
+            if (delta > 0 && currentSoundEnabled) {
+                // Spela max 4 klick per frame vid snabb snurrning (undviker ljudstörningar)
+                repeat(delta.coerceAtMost(4)) { soundEngine.playClick() }
+            }
+            prevNitCount = currentNitCount
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     BackHandler(onBack = onNavigateBack)
 
