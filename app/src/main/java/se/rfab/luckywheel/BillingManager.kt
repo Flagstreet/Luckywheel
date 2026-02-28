@@ -20,6 +20,7 @@ import com.android.billingclient.api.consumePurchase
 import com.android.billingclient.api.queryProductDetails
 import com.android.billingclient.api.queryPurchasesAsync
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -70,6 +71,9 @@ class BillingManager(
     // ── Error events ──────────────────────────────────────────────────────
     private val _billingError = MutableSharedFlow<String>()
     val billingError = _billingError.asSharedFlow()
+
+    // ── Session expiry timer ──────────────────────────────────────────────
+    private var sessionExpiryJob: Job? = null
 
     // ── Internal billing client ───────────────────────────────────────────
     private var billingClient: BillingClient? = null
@@ -244,6 +248,7 @@ class BillingManager(
                 PRODUCT_SESSION -> {
                     Log.d(tag, "Session purchase confirmed.")
                     _sessionUnlocked.value = true
+                    startSessionTimer()
                     consumePurchase(purchase) // Makes it re-purchasable
                 }
             }
@@ -284,12 +289,21 @@ class BillingManager(
             }
             PRODUCT_SESSION -> {
                 _sessionUnlocked.value = true
+                startSessionTimer()
                 Log.d(tag, "[DEBUG] Session unlocked via mock purchase.")
             }
         }
     }
 
     // ── Session management ────────────────────────────────────────────────
+
+    private fun startSessionTimer() {
+        sessionExpiryJob?.cancel()
+        sessionExpiryJob = scope.launch {
+            delay(12 * 60 * 60 * 1000L)
+            _sessionUnlocked.value = false
+        }
+    }
 
     /** Call when the user leaves the wheel to expire the session purchase. */
     fun resetSession() {

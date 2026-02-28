@@ -55,7 +55,10 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -90,6 +93,7 @@ fun LuckyWheelApp() {
     var showWheel    by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     val wheelOptions = remember { mutableStateListOf<WheelOption>() }
+    val inputOptions = remember { mutableStateListOf("", "") }
     val context = LocalContext.current
     val scope   = rememberCoroutineScope()
 
@@ -120,13 +124,13 @@ fun LuckyWheelApp() {
                 options        = wheelOptions,
                 soundEnabled   = soundEnabled,
                 onNavigateBack = {
-                    billingManager.resetSession()
                     showWheel = false
                 },
                 onOpenSettings = { showSettings = true },
                 modifier       = Modifier.padding(innerPadding)
             )
             else -> InputScreen(
+                options         = inputOptions,
                 themeColors     = currentTheme.colors,
                 hasExtraOptions = hasExtraOptions,
                 sessionPrice    = sessionPrice,
@@ -138,6 +142,11 @@ fun LuckyWheelApp() {
                     wheelOptions.clear()
                     wheelOptions.addAll(options)
                     showWheel = true
+                },
+                onNewSession = {
+                    inputOptions.clear()
+                    inputOptions.add("")
+                    inputOptions.add("")
                 },
                 onOpenSettings = { showSettings = true },
                 modifier       = Modifier.padding(innerPadding)
@@ -152,16 +161,17 @@ private const val FREE_OPTION_LIMIT = 3
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InputScreen(
+    options: MutableList<String>,
     themeColors: List<Color>,
     hasExtraOptions: Boolean,
     sessionPrice: String,
     lifetimePrice: String,
     onRequestPurchase: (productId: String) -> Unit,
     onNavigateToWheel: (List<WheelOption>) -> Unit,
+    onNewSession: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val options = remember { mutableStateListOf("", "") }
     var showPurchaseDialog by remember { mutableStateOf(false) }
 
     // Effective cap: 3 for free users, 6 once unlocked
@@ -180,6 +190,9 @@ fun InputScreen(
                 )
             },
             actions = {
+                TextButton(onClick = onNewSession) {
+                    Text("New session")
+                }
                 IconButton(onClick = onOpenSettings) {
                     Text("⚙", style = MaterialTheme.typography.titleLarge)
                 }
@@ -212,7 +225,11 @@ fun InputScreen(
                         onValueChange = { options[index] = it },
                         label = { Text("Option ${index + 1}") },
                         modifier = Modifier.weight(1f),
-                        singleLine = true
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType   = KeyboardType.Text,
+                            capitalization = KeyboardCapitalization.Sentences
+                        )
                     )
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -241,9 +258,9 @@ fun InputScreen(
             ) {
                 Text(
                     text = when {
-                        atAbsoluteMax -> "Max 6 alternativ"
-                        atFreeLimit   -> "🔒 Fler alternativ (4–6)"
-                        else          -> "Lägg till alternativ"
+                        atAbsoluteMax -> "Max 6 options"
+                        atFreeLimit   -> "🔒 More options (4–6)"
+                        else          -> "Add option"
                     },
                     color = Color.White
                 )
@@ -285,7 +302,7 @@ fun InputScreen(
             onDismissRequest = { showPurchaseDialog = false },
             title = {
                 Text(
-                    text = "Fler alternativ",
+                    text = "More options",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
@@ -293,7 +310,7 @@ fun InputScreen(
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "Gratisversionen tillåter upp till 3 alternativ.\nVälj ett av alternativen nedan för att låsa upp 4–6 alternativ.",
+                        text = "The free version allows up to 3 options.\nChoose an option below to unlock 4–6 options.",
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center
                     )
@@ -310,12 +327,12 @@ fun InputScreen(
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                text = "En session  –  $sessionPrice",
+                                text = "One session  –  $sessionPrice",
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
                             Text(
-                                text = "Gäller tills du stänger appen",
+                                text = "Valid for 12 hours",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.White.copy(alpha = 0.8f)
                             )
@@ -335,12 +352,12 @@ fun InputScreen(
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                text = "Livstid  –  $lifetimePrice",
+                                text = "Lifetime  –  $lifetimePrice",
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
                             Text(
-                                text = "Låst upp för alltid",
+                                text = "Unlocked forever",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.White.copy(alpha = 0.8f)
                             )
@@ -351,7 +368,7 @@ fun InputScreen(
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showPurchaseDialog = false }) {
-                    Text("Avbryt")
+                    Text("Cancel")
                 }
             }
         )
@@ -373,7 +390,7 @@ fun WheelScreen(
     val scope       = rememberCoroutineScope()
 
     val sliceAngle = 360f / options.size
-    val nitCount   = 180
+    val nitCount   = 90
     val nitAngleDeg = 360f / nitCount  // 2.0° per nit
 
     // Flärp bend derived from which nit is currently at the 12-o'clock position
@@ -591,7 +608,7 @@ fun WheelScreen(
                     winnerIndex = null
 
                     val vs     = (45..90).random().toFloat()
-                    val tSpinn = (4..12).random().toFloat()
+                    val tSpinn = (6..18).random().toFloat()
                     val totalNits    = vs * tSpinn / 2f
                     val totalDegrees = totalNits * nitAngleDeg
                     val targetAngle  = rotation.value + totalDegrees
@@ -621,7 +638,7 @@ fun WheelScreen(
                     .height(56.dp)
             ) {
                 Text(
-                    text  = if (isSpinning) "Snurrar..." else "Snurra!",
+                    text  = if (isSpinning) "Spinning..." else "Spin!",
                     style = MaterialTheme.typography.titleMedium,
                     color = Color.White
                 )
@@ -635,12 +652,14 @@ fun WheelScreen(
 fun InputScreenPreview() {
     LuckywheelTheme {
         InputScreen(
+            options           = mutableStateListOf("", ""),
             themeColors       = ThemeManager.getById("standard").colors,
             hasExtraOptions   = false,
             sessionPrice      = "1 USD",
             lifetimePrice     = "15 USD",
             onRequestPurchase = {},
             onNavigateToWheel = {},
+            onNewSession      = {},
             onOpenSettings    = {}
         )
     }
