@@ -36,12 +36,7 @@ import kotlinx.coroutines.launch
 const val PRODUCT_SESSION  = "extra_options_session"
 const val PRODUCT_LIFETIME = "extra_options_lifetime"
 
-/**
- * Set BILLING_DEBUG_MODE = true during local development to skip the real
- * Play Billing client. All purchases will be simulated instantly.
- * Flip to false before uploading to Play Console.
- */
-const val BILLING_DEBUG_MODE = true
+val BILLING_DEBUG_MODE = BuildConfig.BILLING_DEBUG_MODE
 
 class BillingManager(
     private val context: Context,

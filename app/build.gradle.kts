@@ -28,6 +28,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            buildConfigField("boolean", "BILLING_DEBUG_MODE", "false")
+        }
+        debug {
+            buildConfigField("boolean", "BILLING_DEBUG_MODE", "true")
         }
     }
     compileOptions {
@@ -36,6 +40,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
